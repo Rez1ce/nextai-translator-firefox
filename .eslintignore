@@ -1,0 +1,4 @@
+public
+dist
+src/tauri/bindings.ts
+src-safari

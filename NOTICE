@@ -1,0 +1,22 @@
+NextAI Translator Community for Firefox
+
+Copyright (C) 2026 Rez1ce (modifications to this fork)
+
+This project is an independent modified version of NextAI Translator:
+https://github.com/nextai-translator/nextai-translator
+
+The original project and this modified version are distributed under the GNU
+Affero General Public License version 3. See LICENSE for the complete terms.
+Existing copyright and license notices from the upstream project and bundled
+third-party dependencies remain applicable to their respective code.
+
+Modification notice — 2026-09-25:
+
+- Limited the application to a Firefox WebExtension target.
+- Added Firefox Manifest V3 background-script compatibility.
+- Added custom OpenAI-compatible API origin and model discovery support.
+- Assigned an independent fork name and Firefox add-on ID.
+- Declared remote translation data transmission in the Firefox manifest.
+- Added tests and Mozilla Add-ons packaging documentation.
+
+This fork is not affiliated with or endorsed by the upstream maintainers.
