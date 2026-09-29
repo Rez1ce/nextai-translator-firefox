@@ -14,6 +14,10 @@ This project is not affiliated with or endorsed by the upstream maintainers. It 
 
 Firefox requests access to all sites because a custom API can use any origin.
 
+## Installation
+
+Install the current Mozilla-reviewed release from [Firefox Browser Add-ons](https://addons.mozilla.org/firefox/addon/nextai-translator-community/).
+
 ## Data transmission
 
 Translation requires sending the content selected by the user to the API provider configured in the extension. When an API key is configured, it is sent only to that configured provider as an authorization credential. The extension does not include analytics or advertising telemetry.

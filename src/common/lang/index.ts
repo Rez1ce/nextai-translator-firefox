@@ -99,7 +99,7 @@ export function getLangName(langCode: string): string {
     return langName || langMap.get(langCode) || langCode
 }
 
-export async function googleDetectLang(text: string): Promise<LangCode> {
+export async function googleDetectLang(text: string): Promise<LangCode | undefined> {
     const langMap: Record<string, LangCode> = {
         'zh-CN': 'zh-Hans',
         'zh-TW': 'zh-Hant',
@@ -150,10 +150,10 @@ export async function googleDetectLang(text: string): Promise<LangCode> {
             return langMap[result[2] as string]
         }
     }
-    return 'en'
+    return undefined
 }
 
-export async function bingDetectLang(text: string): Promise<LangCode> {
+export async function bingDetectLang(text: string): Promise<LangCode | undefined> {
     const tokenURL = 'https://edge.microsoft.com/translate/auth'
 
     const fetcher = getUniversalFetch()
@@ -197,15 +197,16 @@ export async function bingDetectLang(text: string): Promise<LangCode> {
 
         if (resp.ok) {
             const result = await resp.json()
-            if (result[0].language) {
-                return result[0].language
+            const lang = result?.[0]?.language
+            if (lang) {
+                return lang as LangCode
             }
         }
     }
-    return 'en'
+    return undefined
 }
 
-export async function baiduDetectLang(text: string): Promise<LangCode> {
+export async function baiduDetectLang(text: string): Promise<LangCode | undefined> {
     const langMap: Record<string, LangCode> = {
         zh: 'zh-Hans',
         cht: 'zh-Hant',
@@ -238,11 +239,11 @@ export async function baiduDetectLang(text: string): Promise<LangCode> {
     if (resp.ok) {
         const jsn = await resp.json()
         if (jsn && jsn.lan) {
-            return langMap[jsn.lan] || 'en'
+            return langMap[jsn.lan]
         }
     }
 
-    return 'en'
+    return undefined
 }
 
 export async function localDetectLang(text: string): Promise<LangCode> {
@@ -345,18 +346,32 @@ export async function detectLang(text: string): Promise<LangCode> {
         detectedText = detectedText.slice(0, 1000)
     }
     const settings = await getSettings()
+    let remoteDetect: ((text: string) => Promise<LangCode | undefined>) | undefined
     switch (settings.languageDetectionEngine) {
         case 'baidu':
-            return await baiduDetectLang(detectedText)
+            remoteDetect = baiduDetectLang
+            break
         case 'google':
-            return await googleDetectLang(detectedText)
+            remoteDetect = googleDetectLang
+            break
         case 'bing':
-            return await bingDetectLang(detectedText)
+            remoteDetect = bingDetectLang
+            break
         case 'local':
-            return await localDetectLang(detectedText)
         default:
-            return await localDetectLang(detectedText)
+            remoteDetect = undefined
     }
+    if (remoteDetect) {
+        try {
+            const lang = await remoteDetect(detectedText)
+            if (lang) {
+                return lang
+            }
+        } catch (error) {
+            console.warn('Remote language detection failed, falling back to local detection:', error)
+        }
+    }
+    return await localDetectLang(detectedText)
 }
 
 export function getLangConfig(langCode: LangCode): LanguageConfig {

@@ -2,6 +2,12 @@
 
 All notable changes to this independent Firefox fork are documented here.
 
+## 0.6.44-firefox.1 — 2026-09-30
+
+- Added a local language-detection fallback when Baidu, Google, or Bing detection fails or returns an unknown language.
+- Added regression tests for remote language-detection failures and simplified/traditional Chinese detection.
+- Added the official Mozilla Add-ons installation link to the project documentation.
+
 ## 0.6.43-firefox.1 — 2026-09-25
 
 - Established an independent, community-maintained Firefox-only fork.
