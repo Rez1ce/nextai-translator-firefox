@@ -1,6 +1,6 @@
 {
     "name": "nextai-translator-firefox",
-    "version": "0.6.44",
+    "version": "0.6.45",
     "private": true,
     "description": "Independent Firefox-only fork of NextAI Translator with custom OpenAI-compatible API support",
     "author": "Rez1ce",

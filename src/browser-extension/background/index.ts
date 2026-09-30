@@ -10,6 +10,7 @@ import { chatgptArkoseReqParams } from '@/common/constants'
 import { keyChatgptArkoseReqForm, keyChatgptArkoseReqUrl } from '@/common/engines/chatgpt'
 import { keyKimiAccessToken } from '@/common/engines/kimi'
 import { keyChatGLMAccessToken } from '@/common/engines/chatglm'
+import { customAPIRequestLogInternalService } from '@/common/custom-api-request'
 
 browser.contextMenus?.create(
     {
@@ -142,6 +143,8 @@ browser.runtime.onMessage.addListener(async (request) => {
             return await callMethod(request, actionInternalService)
         case BackgroundEventNames.historyService:
             return await callMethod(request, historyInternalService)
+        case BackgroundEventNames.customAPIRequestLogService:
+            return await callMethod(request, customAPIRequestLogInternalService)
         case BackgroundEventNames.getItem:
             const resp = await browser.storage.local.get(request.key)
             return {

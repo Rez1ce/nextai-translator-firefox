@@ -5,13 +5,15 @@ import { Provider } from './engines'
 import { LangCode } from './lang'
 
 /* eslint-disable @typescript-eslint/no-explicit-any */
-interface ISync {
-    get(keys: string[]): Promise<Record<string, any>>
+interface IStorageArea {
+    get(keys: string[] | string): Promise<Record<string, any>>
     set(items: Record<string, any>): Promise<void>
+    remove(keys: string[] | string): Promise<void>
 }
 
 interface IStorage {
-    sync: ISync
+    sync: IStorageArea
+    local: IStorageArea
 }
 
 interface IRuntimeOnMessage {
@@ -21,7 +23,7 @@ interface IRuntimeOnMessage {
 
 interface IRuntime {
     onMessage: IRuntimeOnMessage
-    sendMessage(message: any): void
+    sendMessage(message: any): Promise<any>
     getURL(path: string): string
 }
 
@@ -55,6 +57,7 @@ export interface ISettings {
     apiURL: string
     apiURLPath: string
     apiModel: string
+    customRequestBodyOverrides: string
     provider: Provider
     chatgptModel: string
     azureAPIKeys: string

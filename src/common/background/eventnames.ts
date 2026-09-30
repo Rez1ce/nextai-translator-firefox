@@ -6,6 +6,7 @@ export const BackgroundEventNames = {
     vocabularyService: 'vocabularyService',
     actionService: 'actionService',
     historyService: 'historyService',
+    customAPIRequestLogService: 'customAPIRequestLogService',
     getItem: 'getItem',
     setItem: 'setItem',
     removeItem: 'removeItem',

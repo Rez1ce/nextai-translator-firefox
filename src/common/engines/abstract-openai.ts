@@ -1,6 +1,12 @@
 /* eslint-disable camelcase */
 import { urlJoin } from 'url-join-ts'
 import { getRecommendedOpenAIAPIPath, OPENAI_RESPONSES_API_PATH } from '../openai-api-path'
+import {
+    appendCustomAPIRequestLog,
+    createCustomAPIRequestLogId,
+    mergeCustomRequestBody,
+    updateCustomAPIRequestLog,
+} from '../custom-api-request'
 import { getUniversalFetch } from '../universal-fetch'
 import { defaultAPIURL, defaultAPIURLPath, fetchSSE, getSettings } from '../utils'
 import { AbstractEngine } from './abstract-engine'
@@ -11,13 +17,29 @@ export abstract class AbstractOpenAI extends AbstractEngine {
         return /\/responses\b/.test(apiURLPath)
     }
 
+    private isOpenAIOfficialEndpoint(apiURL: string): boolean {
+        try {
+            const configuredURL = new URL(apiURL)
+            const officialURL = new URL(defaultAPIURL)
+            return (
+                configuredURL.origin === officialURL.origin &&
+                configuredURL.pathname.replace(/\/+$/, '') === officialURL.pathname.replace(/\/+$/, '') &&
+                !configuredURL.username &&
+                !configuredURL.password &&
+                !configuredURL.search &&
+                !configuredURL.hash
+            )
+        } catch {
+            return apiURL.replace(/\/+$/, '').toLowerCase() === defaultAPIURL.toLowerCase()
+        }
+    }
+
     private shouldUseResponsesAPI(apiURL: string, apiURLPath: string, model: string): boolean {
         if (this.isResponsesAPIPath(apiURLPath)) {
             return true
         }
 
-        const normalizedAPIURL = apiURL.replace(/\/+$/, '')
-        const isOpenAIOfficialEndpoint = normalizedAPIURL === defaultAPIURL
+        const isOpenAIOfficialEndpoint = this.isOpenAIOfficialEndpoint(apiURL)
         const usesDefaultChatCompletionsPath = apiURLPath === defaultAPIURLPath
         if (!isOpenAIOfficialEndpoint || !usesDefaultChatCompletionsPath) {
             return false
@@ -50,7 +72,7 @@ export abstract class AbstractOpenAI extends AbstractEngine {
 
     async listModels(apiKey: string | undefined): Promise<IModel[]> {
         const apiUrl = await this.getAPIURL()
-        const isOpenAIOfficialEndpoint = apiUrl.replace(/\/+$/, '') === defaultAPIURL
+        const isOpenAIOfficialEndpoint = this.isOpenAIOfficialEndpoint(apiUrl)
         if (!apiKey && isOpenAIOfficialEndpoint) {
             return []
         }
@@ -102,7 +124,7 @@ export abstract class AbstractOpenAI extends AbstractEngine {
             data.data
                 // eslint-disable-next-line @typescript-eslint/no-explicit-any
                 .filter((model: any) => {
-                    if (apiUrl === 'https://api.openai.com') {
+                    if (isOpenAIOfficialEndpoint) {
                         return model.id.includes('gpt')
                     }
                     return ['text-', 'dall-', 'tts-', 'winsper-', 'davinci', 'babbage'].every(
@@ -201,6 +223,10 @@ export abstract class AbstractOpenAI extends AbstractEngine {
         return /^gpt-5\.[1-9]/.test(model.toLowerCase())
     }
 
+    protected supportsCustomRequestBodyOverrides(): boolean {
+        return false
+    }
+
     async sendMessage(req: IMessageRequest): Promise<void> {
         const apiURL = await this.getAPIURL()
         const apiURLPath = await this.getAPIURLPath()
@@ -259,13 +285,49 @@ export abstract class AbstractOpenAI extends AbstractEngine {
             ]
             body['messages'] = messages
         }
+        const isCustomOpenAIEndpoint = !this.isOpenAIOfficialEndpoint(apiURL)
+        const shouldCustomizeRequest = this.supportsCustomRequestBodyOverrides() && isCustomOpenAIEndpoint
+        const requestBody = shouldCustomizeRequest
+            ? mergeCustomRequestBody(body, settings.customRequestBodyOverrides)
+            : body
+        const requestLogId = shouldCustomizeRequest ? createCustomAPIRequestLogId() : undefined
+        const requestStartedAt = Date.now()
+        const requestLogReady = requestLogId
+            ? appendCustomAPIRequestLog({
+                  id: requestLogId,
+                  timestamp: new Date().toISOString(),
+                  method: 'POST',
+                  url,
+                  headers,
+                  requestBody,
+              }).catch(() => undefined)
+            : Promise.resolve()
+        let responseStatus: number | undefined
+        let requestLogFinished = false
+        const finishRequestLog = (finishReason: string, error?: string) => {
+            if (!requestLogId || requestLogFinished) return
+            requestLogFinished = true
+            void requestLogReady
+                .then(() =>
+                    updateCustomAPIRequestLog(requestLogId, {
+                        status: responseStatus,
+                        durationMs: Date.now() - requestStartedAt,
+                        finishReason,
+                        error,
+                    })
+                )
+                .catch(() => undefined)
+        }
         let finished = false // finished can be called twice because event.data is 1. "finish_reason":"stop"; 2. [DONE]
         let responsesHasStreamedText = false
         await fetchSSE(url, {
             method: 'POST',
             headers,
-            body: JSON.stringify(body),
+            body: JSON.stringify(requestBody),
             signal: req.signal,
+            onStatusCode: (statusCode) => {
+                responseStatus = statusCode
+            },
             onMessage: async (msg) => {
                 if (finished) return
                 let resp
@@ -279,6 +341,7 @@ export abstract class AbstractOpenAI extends AbstractEngine {
                     }
 
                     req.onFinished('stop')
+                    finishRequestLog('stop', msg.trim() === '[DONE]' ? undefined : e?.message)
                     finished = true
                     return
                 }
@@ -308,12 +371,14 @@ export abstract class AbstractOpenAI extends AbstractEngine {
                             }
                         }
                         req.onFinished('stop')
+                        finishRequestLog('stop')
                         finished = true
                         return
                     }
                     if (type === 'response.incomplete') {
                         const reason = resp?.response?.incomplete_details?.reason ?? 'incomplete'
                         req.onFinished(reason)
+                        finishRequestLog(reason)
                         finished = true
                         return
                     }
@@ -322,6 +387,7 @@ export abstract class AbstractOpenAI extends AbstractEngine {
                             resp?.response?.error?.message ?? resp?.error?.message ?? resp?.message ?? 'Unknown error'
                         req.onError?.(errorMessage)
                         req.onFinished('error')
+                        finishRequestLog('error', errorMessage)
                         finished = true
                         return
                     }
@@ -341,6 +407,7 @@ export abstract class AbstractOpenAI extends AbstractEngine {
                 const { finish_reason: finishReason } = choices[0]
                 if (finishReason) {
                     req.onFinished(finishReason)
+                    finishRequestLog(finishReason)
                     finished = true
                     return
                 }
@@ -362,22 +429,26 @@ export abstract class AbstractOpenAI extends AbstractEngine {
             onError: (err) => {
                 if (err instanceof Error) {
                     req.onError(err.message)
+                    finishRequestLog('error', err.message)
                     return
                 }
                 if (typeof err === 'string') {
                     req.onError(err)
+                    finishRequestLog('error', err)
                     return
                 }
                 if (typeof err === 'object') {
                     const { detail } = err
                     if (detail) {
                         req.onError(detail)
+                        finishRequestLog('error', String(detail))
                         return
                     }
                 }
                 const { error } = err
                 if (error instanceof Error) {
                     req.onError(error.message)
+                    finishRequestLog('error', error.message)
                     return
                 }
                 if (typeof error === 'object') {
@@ -385,14 +456,21 @@ export abstract class AbstractOpenAI extends AbstractEngine {
                     if (message) {
                         if (typeof message === 'string') {
                             req.onError(message)
+                            finishRequestLog('error', message)
                         } else {
                             req.onError(JSON.stringify(message))
+                            finishRequestLog('error', JSON.stringify(message))
                         }
                         return
                     }
                 }
                 req.onError('Unknown error')
+                finishRequestLog('error', 'Unknown error')
             },
+        }).catch((err) => {
+            const message = err instanceof Error ? err.message : String(err)
+            finishRequestLog('error', message)
+            throw err
         })
     }
 }

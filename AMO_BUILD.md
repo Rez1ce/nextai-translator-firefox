@@ -1,6 +1,6 @@
 # Mozilla Add-ons source build instructions
 
-These instructions build version 0.6.44 of NextAI Translator Community for Firefox from the submitted source archive.
+These instructions build version 0.6.45 of NextAI Translator Community for Firefox from the submitted source archive.
 
 ## Build environment
 

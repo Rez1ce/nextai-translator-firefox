@@ -1,9 +1,16 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest'
 import { AbstractOpenAI } from './abstract-openai'
 import { Ollama } from './ollama'
+import { OpenAI } from './openai'
 import { IMessageRequest } from './interfaces'
 import { fetchSSE, getSettings } from '../utils'
 import { getUniversalFetch } from '../universal-fetch'
+
+const customRequestLogMocks = vi.hoisted(() => ({
+    append: vi.fn().mockResolvedValue(undefined),
+    update: vi.fn().mockResolvedValue(undefined),
+    createId: vi.fn(() => 'request-log-id'),
+}))
 
 vi.mock('../utils', () => {
     return {
@@ -17,6 +24,16 @@ vi.mock('../utils', () => {
 vi.mock('../universal-fetch', () => {
     return {
         getUniversalFetch: vi.fn(),
+    }
+})
+
+vi.mock('../custom-api-request', async () => {
+    const actual = await vi.importActual<typeof import('../custom-api-request')>('../custom-api-request')
+    return {
+        ...actual,
+        appendCustomAPIRequestLog: customRequestLogMocks.append,
+        updateCustomAPIRequestLog: customRequestLogMocks.update,
+        createCustomAPIRequestLogId: customRequestLogMocks.createId,
     }
 })
 
@@ -49,6 +66,7 @@ class TestOpenAIEngine extends AbstractOpenAI {
 interface MockFetchSSEOptions {
     body?: BodyInit | null
     onMessage: (data: string) => Promise<void>
+    onStatusCode?: (statusCode: number) => void
 }
 
 function createMessageRequest() {
@@ -157,6 +175,148 @@ describe('AbstractOpenAI', () => {
         expect(onMessage).toHaveBeenCalledWith({ content: '你好', role: 'assistant' })
         expect(onFinished).toHaveBeenCalledWith('stop')
     })
+
+    it('merges and logs request body overrides for a custom OpenAI-compatible endpoint', async () => {
+        vi.mocked(getSettings).mockResolvedValue({
+            apiKeys: '',
+            apiURL: 'http://localhost:8000',
+            apiURLPath: '/v1/chat/completions',
+            apiModel: 'gpt-4',
+            customRequestBodyOverrides: JSON.stringify({
+                temperature: 0.75,
+                ['stream_options']: { ['include_usage']: true },
+            }),
+            thinkingEnabled: true,
+        } as never)
+        const engine = new OpenAI()
+        const { req } = createMessageRequest()
+
+        vi.mocked(fetchSSE).mockImplementationOnce(async (input: string, options: MockFetchSSEOptions) => {
+            expect(input).toBe('http://localhost:8000/v1/chat/completions')
+            const payload = JSON.parse(options.body as string)
+            expect(payload.temperature).toBe(0.75)
+            expect(payload['stream_options']).toEqual({ ['include_usage']: true })
+            expect(payload.messages).toEqual([
+                {
+                    role: 'user',
+                    content: 'You are a translator\n\nTranslate hello to Chinese',
+                },
+            ])
+
+            options.onStatusCode?.(200)
+            await options.onMessage(
+                JSON.stringify({
+                    // eslint-disable-next-line camelcase
+                    choices: [{ delta: {}, finish_reason: 'stop' }],
+                })
+            )
+        })
+
+        await engine.sendMessage(req)
+        expect(customRequestLogMocks.append).toHaveBeenCalledWith(
+            expect.objectContaining({
+                id: 'request-log-id',
+                method: 'POST',
+                url: 'http://localhost:8000/v1/chat/completions',
+                requestBody: expect.objectContaining({
+                    temperature: 0.75,
+                    ['stream_options']: { ['include_usage']: true },
+                }),
+            })
+        )
+        expect(customRequestLogMocks.update).toHaveBeenCalledWith(
+            'request-log-id',
+            expect.objectContaining({ status: 200, finishReason: 'stop' })
+        )
+    })
+
+    it('records a network error for a custom OpenAI-compatible endpoint', async () => {
+        vi.mocked(getSettings).mockResolvedValue({
+            apiKeys: '',
+            apiURL: 'http://localhost:8000',
+            apiURLPath: '/v1/chat/completions',
+            apiModel: 'gpt-4',
+            customRequestBodyOverrides: '{}',
+            thinkingEnabled: true,
+        } as never)
+        vi.mocked(fetchSSE).mockRejectedValueOnce(new Error('network unavailable'))
+        const engine = new OpenAI()
+        const { req } = createMessageRequest()
+
+        await expect(engine.sendMessage(req)).rejects.toThrow('network unavailable')
+        expect(customRequestLogMocks.update).toHaveBeenCalledWith(
+            'request-log-id',
+            expect.objectContaining({ finishReason: 'error', error: 'network unavailable' })
+        )
+    })
+
+    it('waits for the initial log entry before recording a fast completion', async () => {
+        vi.mocked(getSettings).mockResolvedValue({
+            apiKeys: '',
+            apiURL: 'http://localhost:8000',
+            apiURLPath: '/v1/chat/completions',
+            apiModel: 'gpt-4',
+            customRequestBodyOverrides: '{}',
+            thinkingEnabled: true,
+        } as never)
+        let finishAppend: (() => void) | undefined
+        customRequestLogMocks.append.mockReturnValueOnce(
+            new Promise<void>((resolve) => {
+                finishAppend = resolve
+            })
+        )
+        vi.mocked(fetchSSE).mockImplementationOnce(async (_input: string, options: MockFetchSSEOptions) => {
+            await options.onMessage(
+                JSON.stringify({
+                    // eslint-disable-next-line camelcase
+                    choices: [{ delta: {}, finish_reason: 'stop' }],
+                })
+            )
+        })
+        const engine = new OpenAI()
+        const { req } = createMessageRequest()
+
+        await engine.sendMessage(req)
+        expect(customRequestLogMocks.update).not.toHaveBeenCalled()
+
+        finishAppend?.()
+        await new Promise((resolve) => setTimeout(resolve, 0))
+        expect(customRequestLogMocks.update).toHaveBeenCalledWith(
+            'request-log-id',
+            expect.objectContaining({ finishReason: 'stop' })
+        )
+    })
+
+    it.each(['https://api.openai.com', 'https://API.OPENAI.COM', 'https://api.openai.com:443/'])(
+        'does not customize or log requests to the official OpenAI endpoint %s',
+        async (apiURL) => {
+            vi.mocked(getSettings).mockResolvedValue({
+                apiKeys: 'test-api-key',
+                apiURL,
+                apiURLPath: '/v1/chat/completions',
+                apiModel: 'gpt-4',
+                customRequestBodyOverrides: JSON.stringify({ model: 'unexpected-model' }),
+                thinkingEnabled: true,
+            } as never)
+            const engine = new OpenAI()
+            const { req } = createMessageRequest()
+
+            vi.mocked(fetchSSE).mockImplementationOnce(async (_input: string, options: MockFetchSSEOptions) => {
+                const payload = JSON.parse(options.body as string)
+                expect(payload.model).toBe('gpt-4')
+
+                await options.onMessage(
+                    JSON.stringify({
+                        // eslint-disable-next-line camelcase
+                        choices: [{ delta: {}, finish_reason: 'stop' }],
+                    })
+                )
+            })
+
+            await engine.sendMessage(req)
+            expect(customRequestLogMocks.append).not.toHaveBeenCalled()
+        }
+    )
 
     it('does not send reasoning_effort for GPT-5 code models', async () => {
         const engine = new TestOpenAIEngine('gpt-5-code')

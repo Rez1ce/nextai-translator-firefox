@@ -2,6 +2,12 @@
 
 All notable changes to this independent Firefox fork are documented here.
 
+## 0.6.45-firefox.1 — 2026-09-30
+
+- Replaced the unused Writing settings tab with a Requests tab for custom OpenAI-compatible APIs.
+- Added validated JSON request-body overrides with safe deep-merge behavior.
+- Added a local request log with HTTP status, duration, errors, and redacted credentials; the newest 100 entries are retained until manually cleared.
+
 ## 0.6.44-firefox.1 — 2026-09-30
 
 - Added a local language-detection fallback when Baidu, Google, or Bing detection fails or returns an unknown language.

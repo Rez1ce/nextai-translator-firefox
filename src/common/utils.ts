@@ -41,6 +41,7 @@ const settingKeys: Record<keyof ISettings, number> = {
     apiURL: 1,
     apiURLPath: 1,
     apiModel: 1,
+    customRequestBodyOverrides: 1,
     provider: 1,
     chatgptModel: 1,
     azureAPIKeys: 1,
@@ -142,6 +143,9 @@ export async function getSettings(): Promise<ISettings> {
     }
     if (!settings.apiModel) {
         settings.apiModel = defaultAPIModel
+    }
+    if (!settings.customRequestBodyOverrides) {
+        settings.customRequestBodyOverrides = '{}'
     }
     if (!settings.provider) {
         settings.provider = defaultProvider

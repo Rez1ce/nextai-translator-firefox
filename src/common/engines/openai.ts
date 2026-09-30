@@ -4,6 +4,10 @@ import { getSettings } from '../utils'
 import { AbstractOpenAI } from './abstract-openai'
 
 export class OpenAI extends AbstractOpenAI {
+    protected supportsCustomRequestBodyOverrides(): boolean {
+        return true
+    }
+
     supportCustomModel(): boolean {
         return true
     }

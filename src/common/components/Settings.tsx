@@ -11,6 +11,7 @@ import { Client as Styletron } from 'styletron-engine-atomic'
 import { Provider as StyletronProvider } from 'styletron-react'
 import { BaseProvider, LightTheme } from 'baseui-sd'
 import { Input } from 'baseui-sd/input'
+import { Textarea } from 'baseui-sd/textarea'
 import { createForm } from './Form'
 import { Button, ButtonProps } from 'baseui-sd/button'
 import { TranslateMode, APIModel } from '../translate'
@@ -74,6 +75,8 @@ import {
     OPENAI_PREFERRED_DEFAULT_MODEL,
     OPENAI_RESPONSES_API_PATH,
 } from '../openai-api-path'
+import { parseCustomRequestBodyOverrides } from '../custom-api-request'
+import { CustomRequestLogs } from './CustomRequestLogs'
 
 const langOptions: Value = supportedLanguages.reduce((acc, [id, label]) => {
     return [
@@ -2192,8 +2195,8 @@ export function InnerSettings({
                         overrides={tabOverrides}
                     />
                     <Tab
-                        title={t('Writing')}
-                        key='writing'
+                        title={t('Requests')}
+                        key='requests'
                         artwork={() => {
                             return <PiTextbox size={14} />
                         }}
@@ -3363,40 +3366,42 @@ export function InnerSettings({
                     </div>
                     <div
                         style={{
-                            display: activeTab === 'writing' ? 'block' : 'none',
+                            display: activeTab === 'requests' ? 'block' : 'none',
                         }}
                     >
                         <FormItem
-                            style={{
-                                display: isDesktopApp ? 'block' : 'none',
-                            }}
-                            name='writingTargetLanguage'
-                            label={t('Writing target language')}
-                        >
-                            <LanguageSelector onBlur={onBlur} />
-                        </FormItem>
-                        <FormItem
-                            style={{
-                                display: isDesktopApp ? 'block' : 'none',
-                            }}
-                            name='writingHotkey'
-                            label={t('Writing Hotkey')}
+                            name='customRequestBodyOverrides'
+                            label={t('Request body overrides')}
                             caption={t(
-                                'Press this shortcut key in the input box of any application, and the text already entered in the input box will be automatically translated into the writing target language.'
+                                'This JSON object is deeply merged into requests sent to a custom OpenAI-compatible API URL. It does not affect the official OpenAI endpoint or other providers.'
                             )}
+                            validators={[
+                                async (_rule, value) => {
+                                    try {
+                                        parseCustomRequestBodyOverrides(value)
+                                    } catch {
+                                        return Promise.reject(t('Request body overrides must be a valid JSON object.'))
+                                    }
+                                    return Promise.resolve()
+                                },
+                            ]}
                         >
-                            <HotkeyRecorder onBlur={onBlur} testId='writing-hotkey-recorder' />
+                            <Textarea
+                                rows={10}
+                                placeholder={
+                                    '{\n  "temperature": 0.2,\n  "stream_options": {\n    "include_usage": true\n  }\n}'
+                                }
+                                onBlur={onBlur}
+                                overrides={{
+                                    Input: {
+                                        style: {
+                                            fontFamily: 'monospace',
+                                        },
+                                    },
+                                }}
+                            />
                         </FormItem>
-                        <FormItem
-                            style={{
-                                display: isDesktopApp ? 'block' : 'none',
-                            }}
-                            name='writingNewlineHotkey'
-                            label={t('Writing line break shortcut')}
-                            caption={t('When writing, which key should be pressed when encountering a line break?')}
-                        >
-                            <HotkeyRecorder onBlur={onBlur} testId='writing-newline-hotkey-recorder' />
-                        </FormItem>
+                        <CustomRequestLogs active={activeTab === 'requests'} />
                     </div>
                     <div
                         style={{
